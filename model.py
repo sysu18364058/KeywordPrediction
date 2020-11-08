@@ -6,7 +6,7 @@ import torch
 from flashtext import KeywordProcessor
 
 from dataset import TextDataset
-from Collator import Datacollator, PredictDatacollator
+from src.data.data_collator import DataCollator, WWMDataCollator
 from src.configuration_bert import BertConfig
 from src.modeling_auto import AutoModelWithLMHead
 from src.tokenization_auto import AutoTokenizer
@@ -32,18 +32,18 @@ parser.add_argument('--output_dir', default='./runs',
                     help='The output directory where the model predictions and checkpoints will be written.')
 args = parser.parse_args()
 
-
 def main(args):
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
     config = BertConfig()
     model = AutoModelWithLMHead.from_config(config)
     model.resize_token_embeddings(len(tokenizer))
-    train_dataset = TextDataset(tokenizer=tokenizer, file_path=args.train_data_file, 
+    train_dataset = TextDataset(tokenizer=tokenizer, file_path=args.train_data_file, max_tokens=512,
                                 block_size=args.block_size, keyword_file=args.keyword_file)
-    eval_dataset = TextDataset(tokenizer=tokenizer, file_path=args.eval_data_file, 
+    eval_dataset = TextDataset(tokenizer=tokenizer, file_path=args.eval_data_file, max_tokens=512,
                                 block_size=args.block_size, keyword_file=args.keyword_file)
-    data_collator = PredictDatacollator(tokenizer=tokenizer)
-    training_args = TrainingArguments(output_dir=args.output_dir)
+    data_collator = WWMDataCollator(tokenizer=tokenizer)
+    training_args = TrainingArguments(output_dir=args.output_dir, per_device_train_batch_size=8,  
+                                      per_device_eval_batch_size=8, num_train_epochs=3)
 
     trainer = Trainer(model=model, args=training_args, data_collator=data_collator, prediction_loss_only=True,
                       train_dataset=train_dataset, eval_dataset=eval_dataset, tokenizer=tokenizer)

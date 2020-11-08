@@ -15,29 +15,30 @@
 # limitations under the License.
 """ GLUE processors and helpers """
 
-import logging
 import os
+from dataclasses import asdict
 from enum import Enum
 from typing import List, Optional, Union
 
 from ...file_utils import is_tf_available
 from ...tokenization_utils import PreTrainedTokenizer
+from ...utils import logging
 from .utils import DataProcessor, InputExample, InputFeatures
+
 
 if is_tf_available():
     import tensorflow as tf
 
-logger = logging.getLogger(__name__)
+logger = logging.get_logger(__name__)
 
 
 def glue_convert_examples_to_features(
-        examples: Union[List[InputExample], "tf.data.Dataset"],
-        tokenizer: PreTrainedTokenizer,
-        max_length: Optional[int] = None,
-        task=None,
-        label_list=None,
-        output_mode=None,
-        tui_ids=None
+    examples: Union[List[InputExample], "tf.data.Dataset"],
+    tokenizer: PreTrainedTokenizer,
+    max_length: Optional[int] = None,
+    task=None,
+    label_list=None,
+    output_mode=None,
 ):
     """
     Loads a data file into a list of ``InputFeatures``
@@ -51,9 +52,9 @@ def glue_convert_examples_to_features(
         output_mode: String indicating the output mode. Either ``regression`` or ``classification``
 
     Returns:
-        If the ``examples`` input is a ``tf.data.Dataset``, will return a ``tf.data.Dataset``
-        containing the task-specific features. If the input is a list of ``InputExamples``, will return
-        a list of task-specific ``InputFeatures`` which can be fed to the model.
+        If the ``examples`` input is a ``tf.data.Dataset``, will return a ``tf.data.Dataset`` containing the
+        task-specific features. If the input is a list of ``InputExamples``, will return a list of task-specific
+        ``InputFeatures`` which can be fed to the model.
 
     """
     if is_tf_available() and isinstance(examples, tf.data.Dataset):
@@ -61,15 +62,17 @@ def glue_convert_examples_to_features(
             raise ValueError("When calling glue_convert_examples_to_features from TF, the task parameter is required.")
         return _tf_glue_convert_examples_to_features(examples, tokenizer, max_length=max_length, task=task)
     return _glue_convert_examples_to_features(
-        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, output_mode=output_mode,
-        tui_ids=tui_ids
+        examples, tokenizer, max_length=max_length, task=task, label_list=label_list, output_mode=output_mode
     )
 
 
 if is_tf_available():
 
     def _tf_glue_convert_examples_to_features(
-            examples: tf.data.Dataset, tokenizer: PreTrainedTokenizer, task=str, max_length: Optional[int] = None,
+        examples: tf.data.Dataset,
+        tokenizer: PreTrainedTokenizer,
+        task=str,
+        max_length: Optional[int] = None,
     ) -> tf.data.Dataset:
         """
         Returns:
@@ -79,40 +82,30 @@ if is_tf_available():
         processor = glue_processors[task]()
         examples = [processor.tfds_map(processor.get_example_from_tensor_dict(example)) for example in examples]
         features = glue_convert_examples_to_features(examples, tokenizer, max_length=max_length, task=task)
+        label_type = tf.float32 if task == "sts-b" else tf.int64
 
         def gen():
             for ex in features:
-                yield (
-                    {
-                        "input_ids": ex.input_ids,
-                        "attention_mask": ex.attention_mask,
-                        "token_type_ids": ex.token_type_ids,
-                    },
-                    ex.label,
-                )
+                d = {k: v for k, v in asdict(ex).items() if v is not None}
+                label = d.pop("label")
+                yield (d, label)
+
+        input_names = ["input_ids"] + tokenizer.model_input_names
 
         return tf.data.Dataset.from_generator(
             gen,
-            ({"input_ids": tf.int32, "attention_mask": tf.int32, "token_type_ids": tf.int32}, tf.int64),
-            (
-                {
-                    "input_ids": tf.TensorShape([None]),
-                    "attention_mask": tf.TensorShape([None]),
-                    "token_type_ids": tf.TensorShape([None]),
-                },
-                tf.TensorShape([]),
-            ),
+            ({k: tf.int32 for k in input_names}, label_type),
+            ({k: tf.TensorShape([None]) for k in input_names}, tf.TensorShape([])),
         )
 
 
 def _glue_convert_examples_to_features(
-        examples: List[InputExample],
-        tokenizer: PreTrainedTokenizer,
-        max_length: Optional[int] = None,
-        task=None,
-        label_list=None,
-        output_mode=None,
-        tui_ids=None
+    examples: List[InputExample],
+    tokenizer: PreTrainedTokenizer,
+    max_length: Optional[int] = None,
+    task=None,
+    label_list=None,
+    output_mode=None,
 ):
     if max_length is None:
         max_length = tokenizer.max_len
@@ -139,15 +132,16 @@ def _glue_convert_examples_to_features(
 
     labels = [label_from_example(example) for example in examples]
 
-    batch_encoding = tokenizer.batch_encode_plus(
-        [(example.text_a, example.text_b) for example in examples], max_length=max_length, pad_to_max_length=True,
+    batch_encoding = tokenizer(
+        [(example.text_a, example.text_b) for example in examples],
+        max_length=max_length,
+        padding="max_length",
+        truncation=True,
     )
 
     features = []
     for i in range(len(examples)):
         inputs = {k: batch_encoding[k][i] for k in batch_encoding}
-        if tui_ids is not None:
-            inputs['tui_ids'] = tui_ids[inputs['input_ids']].tolist()
 
         feature = InputFeatures(**inputs, label=labels[i])
         features.append(feature)
@@ -240,18 +234,12 @@ class MnliProcessor(DataProcessor):
         """Creates examples for the training, dev and test sets."""
         examples = []
         for (i, line) in enumerate(lines):
-            # TODO CHECK
             if i == 0:
                 continue
-
-            # guid = "%s-%s" % (set_type, line[0])
-            guid = "%s-%s" % (set_type, i)
-
-            # TODO CHECK
-            text_a = line[0]
-            text_b = line[1]
-            # label = None if set_type.startswith("test") else line[-1]
-            label = line[-1]
+            guid = "%s-%s" % (set_type, line[0])
+            text_a = line[8]
+            text_b = line[9]
+            label = None if set_type.startswith("test") else line[-1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
 
@@ -301,16 +289,12 @@ class ColaProcessor(DataProcessor):
         test_mode = set_type == "test"
         if test_mode:
             lines = lines[1:]
-        # TODO check it
-        text_index = 0
-        # text_index = 1 if test_mode else 0
+        text_index = 1 if test_mode else 3
         examples = []
         for (i, line) in enumerate(lines):
-
             guid = "%s-%s" % (set_type, i)
             text_a = line[text_index]
-            # label = None if test_mode else line[1]
-            label = line[1]
+            label = None if test_mode else line[1]
             examples.append(InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 

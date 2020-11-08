@@ -4,14 +4,15 @@ from flashtext import KeywordProcessor
 
 from torch.utils.data.dataset import Dataset
 
-from src.tokenization_utils import PreTrainedTokenizer
+from src.tokenization_utils import PreTrainedTokenizerBase
 
 
 class TextDataset(Dataset):
     def __init__(self, 
-                 tokenizer: PreTrainedTokenizer,
+                 tokenizer: PreTrainedTokenizerBase,
                  file_path: str,
                  block_size: int,
+                 max_tokens: int,
                  keyword_file: str):
         kw_list = []
         f = open(keyword_file, 'r', encoding='utf-8')
@@ -29,20 +30,22 @@ class TextDataset(Dataset):
                 for i in range(0, len(dialogue)-block_size+1, block_size):
                     block = dialogue[i:i+block_size]
                     keywords = self.match_keywords(''.join(block), self.keyword_processor)
-                    keywords = ''.join(keywords)
-                    keywords = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(keywords))
+                    # keywords = ''.join(keywords)
+                    # keywords = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(keywords))
                     example = {}
                     example['sen'] = []
                     for j, sen in enumerate(block):
                         block[j] = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(sen))
                         example['sen'] += tokenizer.build_inputs_with_special_tokens(block[j])
-                    example['keywords'] = tokenizer.build_inputs_with_special_tokens(keywords)
+                    example['sen'] = example['sen'][:max_tokens]
+                    # example['keywords'] = tokenizer.build_inputs_with_special_tokens(keywords)
+                    example['keywords'] = keywords
                     self.examples.append(example)
         
     def __len__(self):
         return len(self.examples)
 
-    def __getitem__(self, idx) -> dict: # [sentences_tokens, keyword_tokens]
+    def __getitem__(self, idx) -> dict: # {'sen':[sentences_token_ids], 'keywords':[list of keywords]}
         return self.examples[idx]
 
     def build_keyword_processor(self, kw_list):
