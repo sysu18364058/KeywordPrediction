@@ -45,7 +45,7 @@ class TextDataset(Dataset):
     def __len__(self):
         return len(self.examples)
 
-    def __getitem__(self, idx) -> dict: # {'sen':[sentences_token_ids], 'keywords':[list of keywords]}
+    def __getitem__(self, idx) -> dict: # {'sen':[sentences_token_ids], 'keywords':[keywords_token_ids]}
         return self.examples[idx]
 
     def build_keyword_processor(self, kw_list):

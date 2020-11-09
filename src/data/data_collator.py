@@ -681,7 +681,7 @@ class WWMDataCollator(DataCollatorForLanguageModeling):
         all_sens = []
         labels = []
         for ex in examples:
-            sen, label = self.mask_keyword_tokens(ex)
+            sen, label = self.whole_word_mask_keyword_tokens(ex)
             all_sens.append(sen)
             labels.append(label)
         length_of_first = all_sens[0].size(0)
@@ -702,36 +702,29 @@ class WWMDataCollator(DataCollatorForLanguageModeling):
 
     def whole_word_mask_keyword_tokens(self,
                     inputs: dict,):
-        inputs['sen'] = torch.tensor(inputs['sen'])
-        ref_tokens = []
-        mask_idx = []       # record masked tokens
-        for idx in inputs['sen'].tolist():
-            # get tokens from index
-            token = self.tokenizer._convert_id_to_token(idx)
-            ref_tokens.append(token)
-        # e.g. ref_tokens: ['我', '喜', '欢', '喜', '欢',  '你'], keywords: ['喜欢', '你']
-        # if mlm_porb = 1, get ref_tokens:['我', '喜', '##欢', '喜', '##欢',  '你']
-        ref_sen = ''.join(ref_tokens)
+        # only compute loss on masked tokens
+        labels = [-100]*len(inputs['sen'])
+        kw_tokens_ids = []
         for kw in inputs['keywords']:
-            kw_idx = [i for i in re.finditer(kw, ref_sen)]
-            for i in kw_idx:
-                if random.random() < self.mlm_prob:
+            kw_tokens_ids.append(self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(kw)))
+        # kw_tokens_ids: [['kw1_token', 'kw2_token', ...], ['kw1_token', 'kw2_token', ...]]
+        for kw in kw_tokens_ids:
+            for i in range(len(inputs['sen'])):
+                if inputs['sen'][i:i+len(kw)] == kw and random.random() < self.mlm_prob:
+                    # mask keywords
                     prob = random.random()
                     for pos in range(len(kw)):
-                        mask_idx.append(i+pos)
                         if pos > 0:     # whole word mask
-                            ref_tokens[i+pos] = '##' + ref_tokens[i+pos]
+                            masked_token = '##' + self.tokenizer._convert_id_to_token(kw[pos])
+                            inputs['sen'][i+pos] = self.tokenizer._convert_token_to_id(masked_token)
+
+                        labels[i+pos] = self.tokenizer._convert_token_to_id(inputs['sen'][i+pos])
 
                         if prob < 0.8:  # 80% keyword mask
-                            inputs['sen'][i+pos] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+                            inputs['sen'][i+pos] = self.tokenizer._convert_token_to_id(self.tokenizer.mask_token)
                         elif prob < 0.9:  # 10% replace with random word
-                            random_words = torch.randint(len(self.tokenizer), inputs['sen'].shape, dtype=torch.long)
+                            random_words = torch.randint(len(self.tokenizer), ([len(inputs['sen'])]), dtype=torch.long)
                             inputs['sen'][i+pos] = random_words[i]
-                        # 10% keep unchanged
-                        
-        # only compute loss on masked tokens
-        labels = torch.ones(len(inputs['sen']), dtype=torch.int) * -100
-        for i in mask_idx:
-            labels[i] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(ref_tokens[i]))
-                    
-        return inputs['sen'], labels
+                        # 10% keep unchanged 
+                           
+        return torch.tensor(inputs['sen']), torch.tensor(labels)
